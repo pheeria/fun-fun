@@ -135,7 +135,7 @@ def query():
             (filters, display_filters, applied_filters) = process_filters(filters_input)
         query_obj = qu.create_query(user_query,  filters, sort, sortDir, size=20)
         #### W2, L1, S2
-
+        qu.add_spelling_suggestions(query_obj, user_query)
         ##### W2, L2, S2
 
     else:
