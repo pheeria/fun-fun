@@ -30,11 +30,11 @@ def process_filters(filters_input):
             print("from: {}, to: {}".format(from_val, to_val))
             # we need to turn the "to-from" syntax of aggregations to the "gte,lte" syntax of range filters.
             to_from = {}
-            if from_val:
+            if from_val and from_val != "*":
                 to_from["gte"] = from_val
             else:
                 from_val = "*"  # set it to * for display purposes, but don't use it in the query
-            if to_val:
+            if to_val and to_val != "*":
                 to_from["lt"] = to_val
             else:
                 to_val = "*"  # set it to * for display purposes, but don't use it in the query
@@ -94,7 +94,7 @@ def query():
     print("query obj: {}".format(query_obj))
 
     #### Step 4.b.ii
-    response = None   # TODO: Replace me with an appropriate call to OpenSearch
+    response = opensearch.search(body=query_obj, index="bbuy_products")
     # Postprocess results here if you so desire
 
     #print(response)
@@ -111,11 +111,113 @@ def create_query(user_query, filters, sort="_score", sortDir="desc"):
     query_obj = {
         'size': 10,
         "query": {
-            "match_all": {} # Replace me with a query that both searches and filters
+            "function_score": {
+                "query": {
+                    "boosting": {
+                        "positive": {
+                            "bool": {
+                                "must": {
+                                    "query_string": {
+                                        "fields": ["name^100", "shortDescription^50", "longDescription^10", "department"],
+                                        "phrase_slop": 3,
+                                        "query": user_query
+                                    }
+                                },
+                                "filter": filters,
+                            }
+                        },
+                        "negative": {
+                            "multi_match": {
+                                "fields": ["longDescription", "shortDescription", "name"], 
+                                "query": "your compatible"
+                            }
+                        },
+                        "negative_boost": 0.2
+                    },
+                },
+                "boost_mode": "multiply",
+                "score_mode": "avg",
+                "functions": [
+                    {
+                        "field_value_factor": {
+                            "field": "salesRankLongTerm",
+                            "modifier": "reciprocal",
+                            "missing": 100000000
+                        }
+                    },
+                    {
+                        "field_value_factor": {
+                            "field": "salesRankMediumTerm",
+                            "modifier": "reciprocal",
+                            "missing": 100000000
+                        }
+                    },
+                    {
+                        "field_value_factor": {
+                            "field": "salesRankShortTerm",
+                            "modifier": "reciprocal",
+                            "missing": 100000000
+                        }
+                    }
+                ]
+            }
         },
         "aggs": {
-            #### Step 4.b.i: create the appropriate query and aggregations here
-
-        }
+            "department": {
+                "terms": {
+                    "field": "department.keyword"
+                }
+            },
+            "regularPrice": {
+                "range": {
+                    "field": "regularPrice",
+                    "ranges": [
+                        {
+                            "key": "$",
+                            "to": 100
+                        },
+                        {
+                            "key": "$$",
+                            "from": 100,
+                            "to": 200
+                        },
+                        {
+                            "key": "$$$",
+                            "from": 200,
+                            "to": 300
+                        },
+                        {
+                            "key": "$$$$",
+                            "from": 300,
+                            "to": 400
+                        },
+                        {
+                            "key": "$$$$$",
+                            "from": 400,
+                            "to": 500,
+                        },
+                        {
+                            "key": "$$$$$$",
+                            "from": 500,
+                        }
+                    ]
+                }
+            },
+            "missing_images": {
+                "missing": {
+                    "field": "image"
+                }
+            }
+        },
+        "highlight": {
+            "fields": {
+                "name": { "pre_tags" : ["<b>"], "post_tags" : ["</b>"] },
+                "shortDescription": { "pre_tags" : ["<b>"], "post_tags" : ["</b>"] },
+                "longDescription": { "pre_tags" : ["<b>"], "post_tags" : ["</b>"] },
+            }
+        },
+        "sort": [
+            { sort: { "order": sortDir} }
+        ]
     }
     return query_obj
